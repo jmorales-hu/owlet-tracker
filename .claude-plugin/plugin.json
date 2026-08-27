@@ -2,5 +2,5 @@
   "name": "owlet",
   "description": "owlet-tracker's own plugin: the skills that read Jira and act, calling the owlet CLI for every structural write.",
   "version": "0.1.0",
-  "skills": ["./skills/intake"]
+  "skills": ["./skills/intake", "./skills/owlet-setup"]
 }
