@@ -6,6 +6,7 @@ export {
   isRoute,
   isThreadStatus,
   listThreads,
+  mostRecentThread,
   ROUTES,
   showThread,
   THREAD_STATUSES,

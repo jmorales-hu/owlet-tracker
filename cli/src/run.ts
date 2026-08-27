@@ -49,6 +49,7 @@ Commands:
                           Remove a Blocker edge from a Ticket.
   frontier <KEY>          List the Open Tickets whose every Blocker is Done.
   map <KEY>               Show the Map's Tickets, layered by depth in the blocking graph.
+  tui [KEY]               Open the Map TUI. With no key, opens the most recently modified Thread.
 
 Options:
   --json    Output machine-readable JSON on commands that support it

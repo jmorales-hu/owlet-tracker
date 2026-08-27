@@ -2,9 +2,12 @@
   "name": "@owlet/tui",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./src/index.tsx",
+  "types": "./src/index.tsx",
   "dependencies": {
-    "@owlet/core": "workspace:*"
+    "@owlet/core": "workspace:*",
+    "ink": "^7.1.1",
+    "react": "^19.2.8",
+    "react-devtools-core": "^7.0.1"
   }
 }

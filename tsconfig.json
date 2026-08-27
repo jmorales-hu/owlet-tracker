@@ -26,5 +26,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "include": ["core/src/**/*.ts", "cli/src/**/*.ts", "cli/test/**/*.ts", "tui/src/**/*.ts"]
+  "include": ["core/src/**/*.ts", "cli/src/**/*.ts", "cli/test/**/*.ts", "tui/src/**/*.tsx"]
 }

@@ -6,6 +6,7 @@
     "owlet": "./src/bin.ts"
   },
   "dependencies": {
-    "@owlet/core": "workspace:*"
+    "@owlet/core": "workspace:*",
+    "@owlet/tui": "workspace:*"
   }
 }
