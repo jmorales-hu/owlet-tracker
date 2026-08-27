@@ -25,8 +25,9 @@ export {
   isTicketStatus,
   listBlockers,
   listTickets,
+  mapRows,
   removeBlocker,
   TICKET_STATUSES,
   TicketNotFoundError,
 } from "./ticket";
-export type { Ticket, TicketStatus } from "./ticket";
+export type { MapRow, Ticket, TicketStatus } from "./ticket";

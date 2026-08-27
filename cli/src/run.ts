@@ -1,4 +1,4 @@
-import type { Env, Thread, Ticket } from "@owlet/core";
+import type { Env, MapRow, Thread, Ticket } from "@owlet/core";
 import {
   addBlocker,
   BlockerNotFoundError,
@@ -13,6 +13,7 @@ import {
   listBlockers,
   listThreads,
   listTickets,
+  mapRows,
   removeBlocker,
   ROUTES,
   showThread,
@@ -47,6 +48,7 @@ Commands:
   blocker rm  <KEY> <ID> --blocked-by <ID>
                           Remove a Blocker edge from a Ticket.
   frontier <KEY>          List the Open Tickets whose every Blocker is Done.
+  map <KEY>               Show the Map's Tickets, layered by depth in the blocking graph.
 
 Options:
   --json    Output machine-readable JSON on commands that support it
@@ -382,6 +384,48 @@ function runFrontier({ env, positionals, flags }: Invocation): Result {
   }
 }
 
+function mapRowJson(row: MapRow) {
+  return {
+    id: row.id,
+    title: row.title,
+    status: row.status,
+    depth: row.depth,
+    frontier: row.frontier,
+    blockedBy: row.blockedBy,
+    blocks: row.blocks,
+  };
+}
+
+function formatMap(rows: MapRow[]): string {
+  if (rows.length === 0) return "";
+  const lines = rows.map((row) =>
+    [
+      row.depth,
+      row.id,
+      row.status,
+      row.frontier ? "frontier" : "",
+      row.title,
+      row.blockedBy.join(","),
+      row.blocks.join(","),
+    ].join("\t"),
+  );
+  return ["DEPTH\tID\tSTATUS\tFRONTIER\tTITLE\tBLOCKED_BY\tBLOCKS", ...lines].join("\n") + "\n";
+}
+
+function runMap({ env, positionals, flags }: Invocation): Result {
+  const key = positionals[0];
+  if (!key) return fail("map requires a Thread key");
+
+  try {
+    const rows = mapRows(env, key);
+    if (flags.json) return ok(`${JSON.stringify(rows.map(mapRowJson))}\n`);
+    return ok(formatMap(rows));
+  } catch (error) {
+    if (error instanceof ThreadNotFoundError) return fail(error.message);
+    throw error;
+  }
+}
+
 export function run(argv: string[], env: Env, stdin = ""): Result {
   const { positionals, flags } = parseArgs(argv);
   const [command, ...rest] = positionals;
@@ -404,6 +448,10 @@ export function run(argv: string[], env: Env, stdin = ""): Result {
 
   if (command === "frontier") {
     return runFrontier({ env, positionals: rest, flags, stdin });
+  }
+
+  if (command === "map") {
+    return runMap({ env, positionals: rest, flags, stdin });
   }
 
   return {

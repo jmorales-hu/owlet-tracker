@@ -20,6 +20,16 @@ export type Ticket = {
   blockedBy: string[];
 };
 
+export type MapRow = {
+  id: string;
+  title: string;
+  status: TicketStatus;
+  depth: number;
+  frontier: boolean;
+  blockedBy: string[];
+  blocks: string[];
+};
+
 export class TicketNotFoundError extends Error {
   constructor(
     public readonly key: string,
@@ -269,6 +279,10 @@ export function removeBlocker(env: Env, key: string, id: string, blockerId: stri
   return updated;
 }
 
+function isOnFrontier(ticket: Ticket, doneIds: Set<string>): boolean {
+  return ticket.status === "open" && ticket.blockedBy.every((blockerId) => doneIds.has(blockerId));
+}
+
 // The Open Tickets whose every Blocker is Done. Derived fresh from blocked_by edges on
 // every call — never stored, so it reflects a Blocker's status change immediately.
 export function frontier(env: Env, key: string): Ticket[] {
@@ -276,9 +290,47 @@ export function frontier(env: Env, key: string): Ticket[] {
   const tickets = ticketFiles(dir).map((filename) => readTicket(key, dir, filename));
   const doneIds = new Set(tickets.filter((ticket) => ticket.status === "done").map((ticket) => ticket.id));
 
+  return tickets.filter((ticket) => isOnFrontier(ticket, doneIds)).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+// Layered rows for the whole Map: depth in the blocking graph, the Frontier flag, and the
+// derived `blocks` set (the inverse of `blocked_by`, computed fresh — never stored). Ordered
+// by depth then id, which always places a Ticket after every Ticket it waits on.
+export function mapRows(env: Env, key: string): MapRow[] {
+  const dir = requireMapDir(env, key);
+  const tickets = ticketFiles(dir).map((filename) => readTicket(key, dir, filename));
+  const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  const doneIds = new Set(tickets.filter((ticket) => ticket.status === "done").map((ticket) => ticket.id));
+
+  const blocks = new Map<string, string[]>();
+  for (const ticket of tickets) {
+    for (const blockerId of ticket.blockedBy) {
+      blocks.set(blockerId, [...(blocks.get(blockerId) ?? []), ticket.id]);
+    }
+  }
+
+  const depths = new Map<string, number>();
+  function depthOf(id: string): number {
+    const cached = depths.get(id);
+    if (cached !== undefined) return cached;
+
+    const blockedBy = byId.get(id)?.blockedBy ?? [];
+    const depth = blockedBy.length === 0 ? 0 : 1 + Math.max(...blockedBy.map(depthOf));
+    depths.set(id, depth);
+    return depth;
+  }
+
   return tickets
-    .filter((ticket) => ticket.status === "open" && ticket.blockedBy.every((blockerId) => doneIds.has(blockerId)))
-    .sort((a, b) => a.id.localeCompare(b.id));
+    .map((ticket) => ({
+      id: ticket.id,
+      title: ticket.title,
+      status: ticket.status,
+      depth: depthOf(ticket.id),
+      frontier: isOnFrontier(ticket, doneIds),
+      blockedBy: ticket.blockedBy,
+      blocks: (blocks.get(ticket.id) ?? []).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => a.depth - b.depth || a.id.localeCompare(b.id));
 }
 
 export function listBlockers(env: Env, key: string, id: string): Ticket[] {
