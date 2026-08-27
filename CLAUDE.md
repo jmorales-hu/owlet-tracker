@@ -4,14 +4,20 @@ Personal work-tracking tool.
 
 ## Structure
 
-- `core/` — domain logic (entries, timers, storage). Keep free of CLI/TUI concerns.
-- `cli/` — command-line interface, depends on `core/`.
-- `tui/` — terminal UI, depends on `core/`.
+- `core/` — the Store: reading and writing Thread trees, Map graph derivation, Frontier
+  computation, cycle detection. Keep free of CLI/TUI concerns.
+- `cli/` — the `owlet` binary, depends on `core/`. The only writer to the Store.
+- `tui/` — terminal UI (Ink), depends on `core/`. Read-only.
+- `.claude-plugin/`, `skills/` — the `owlet` plugin: the skills that do the judgement and
+  the acting (Jira, git, status transitions). They call the CLI for every structural write.
 
 ## Notes
 
-- No stack chosen yet. Ask before introducing a language, framework, or package manager.
+- Stack: TypeScript on Bun; Ink for the TUI. Ask before introducing any further
+  framework or package.
 - `cli/` and `tui/` are consumers of `core/`; dependencies never point the other way.
+- Vocabulary is defined in `CONTEXT.md`. Use those terms exactly; don't invent synonyms.
+- `core/` and `cli/` hold no credentials. Anything touching Jira or git lives in a skill.
 
 ## Agent skills
 
