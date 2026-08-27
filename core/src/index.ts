@@ -21,6 +21,7 @@ export {
   createTicket,
   CycleError,
   doneTicket,
+  frontier,
   isTicketStatus,
   listBlockers,
   listTickets,

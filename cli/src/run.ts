@@ -8,6 +8,7 @@ import {
   CycleError,
   deliverThread,
   doneTicket,
+  frontier,
   isRoute,
   listBlockers,
   listThreads,
@@ -45,6 +46,7 @@ Commands:
                           Add a Blocker edge to a Ticket.
   blocker rm  <KEY> <ID> --blocked-by <ID>
                           Remove a Blocker edge from a Ticket.
+  frontier <KEY>          List the Open Tickets whose every Blocker is Done.
 
 Options:
   --json    Output machine-readable JSON on commands that support it
@@ -352,6 +354,34 @@ function runBlocker(invocation: Invocation): Result {
   }
 }
 
+function formatFrontier(tickets: Ticket[]): string {
+  if (tickets.length === 0) return "";
+  const rows = tickets.map((ticket) => `${ticket.id}\t${ticket.title}`);
+  return ["ID\tTITLE", ...rows].join("\n") + "\n";
+}
+
+function emptyFrontierReason(allTickets: Ticket[]): string {
+  if (allTickets.length === 0) return "Frontier is empty: this Map has no Tickets\n";
+  if (allTickets.every((ticket) => ticket.status === "done")) return "Frontier is empty: every Ticket is Done\n";
+  return "Frontier is empty: remaining Tickets are Claimed or blocked\n";
+}
+
+function runFrontier({ env, positionals, flags }: Invocation): Result {
+  const key = positionals[0];
+  if (!key) return fail("frontier requires a Thread key");
+
+  try {
+    const rows = frontier(env, key);
+    const stderr = rows.length === 0 ? emptyFrontierReason(listTickets(env, key)) : "";
+
+    if (flags.json) return ok(`${JSON.stringify(rows.map(ticketJson))}\n`, stderr);
+    return ok(formatFrontier(rows), stderr);
+  } catch (error) {
+    if (error instanceof ThreadNotFoundError) return fail(error.message);
+    throw error;
+  }
+}
+
 export function run(argv: string[], env: Env, stdin = ""): Result {
   const { positionals, flags } = parseArgs(argv);
   const [command, ...rest] = positionals;
@@ -370,6 +400,10 @@ export function run(argv: string[], env: Env, stdin = ""): Result {
 
   if (command === "blocker") {
     return runBlocker({ env, positionals: rest, flags, stdin });
+  }
+
+  if (command === "frontier") {
+    return runFrontier({ env, positionals: rest, flags, stdin });
   }
 
   return {

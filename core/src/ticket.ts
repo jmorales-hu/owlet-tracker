@@ -269,6 +269,18 @@ export function removeBlocker(env: Env, key: string, id: string, blockerId: stri
   return updated;
 }
 
+// The Open Tickets whose every Blocker is Done. Derived fresh from blocked_by edges on
+// every call — never stored, so it reflects a Blocker's status change immediately.
+export function frontier(env: Env, key: string): Ticket[] {
+  const dir = requireMapDir(env, key);
+  const tickets = ticketFiles(dir).map((filename) => readTicket(key, dir, filename));
+  const doneIds = new Set(tickets.filter((ticket) => ticket.status === "done").map((ticket) => ticket.id));
+
+  return tickets
+    .filter((ticket) => ticket.status === "open" && ticket.blockedBy.every((blockerId) => doneIds.has(blockerId)))
+    .sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export function listBlockers(env: Env, key: string, id: string): Ticket[] {
   const dir = requireMapDir(env, key);
   const filename = findTicketFile(dir, id);
