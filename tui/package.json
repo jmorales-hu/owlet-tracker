@@ -1,0 +1,10 @@
+{
+  "name": "@owlet/tui",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@owlet/core": "workspace:*"
+  }
+}

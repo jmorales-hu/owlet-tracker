@@ -1,0 +1,11 @@
+{
+  "name": "@owlet/cli",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "owlet": "./src/bin.ts"
+  },
+  "dependencies": {
+    "@owlet/core": "workspace:*"
+  }
+}
