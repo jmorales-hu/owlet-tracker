@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Env } from "./env";
 import { resolveHome } from "./env";
@@ -130,6 +130,38 @@ export function listThreads(env: Env): Thread[] {
     .filter((key) => existsSync(threadFile(join(dir, key))))
     .map((key) => readThread(join(dir, key), key))
     .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+// Latest mtime of any file anywhere under `dir`, so a Ticket edit inside `map/` counts as a
+// modification to its Thread just as much as an edit to `thread.md` itself.
+function latestMtimeMs(dir: string): number {
+  let latest = 0;
+  const stack: string[] = [dir];
+
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(path);
+      } else {
+        latest = Math.max(latest, statSync(path).mtimeMs);
+      }
+    }
+  }
+
+  return latest;
+}
+
+// The Thread with the most recently modified file anywhere in its tree, so resuming work
+// from `owlet tui` with no key lands on whatever was touched last.
+export function mostRecentThread(env: Env): Thread | undefined {
+  const threads = listThreads(env);
+  if (threads.length === 0) return undefined;
+
+  return threads
+    .map((thread) => ({ thread, mtime: latestMtimeMs(threadDir(env, thread.key)) }))
+    .sort((a, b) => b.mtime - a.mtime)[0]!.thread;
 }
 
 export function showThread(env: Env, key: string): Thread {
