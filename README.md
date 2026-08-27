@@ -20,6 +20,20 @@ Nothing to run yet. The stack is TypeScript on [Bun](https://bun.sh), with
 [Ink](https://github.com/vadimdemedes/ink) for the TUI; build and run instructions go
 here once there is something to build.
 
+## Plugin
+
+This repo ships its own Claude Code plugin, `owlet`, from `.claude-plugin/` and `skills/` —
+see [ADR-0001](docs/adr/0001-skills-act-cli-writes.md) for why it isn't a separately
+versioned one. To load it from a clone, run Claude Code from the repo root with:
+
+```
+claude --plugin-dir .
+```
+
+Its skills (e.g. `/intake`) shell out to the compiled `owlet` binary, building it on first
+use if `dist/owlet` isn't already there — see `skills/intake/SKILL.md` for how a skill
+locates it.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
