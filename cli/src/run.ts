@@ -1,13 +1,18 @@
 import type { Env, Thread, Ticket } from "@owlet/core";
 import {
+  addBlocker,
+  BlockerNotFoundError,
   claimTicket,
   createThread,
   createTicket,
+  CycleError,
   deliverThread,
   doneTicket,
   isRoute,
+  listBlockers,
   listThreads,
   listTickets,
+  removeBlocker,
   ROUTES,
   showThread,
   ThreadExistsError,
@@ -32,10 +37,14 @@ Commands:
   thread list             List every Thread with its Route and status.
   thread show <KEY>       Show one Thread's Route, branch and creation date.
   thread deliver <KEY>    Mark a Thread delivered.
-  ticket new <KEY> <title>
+  ticket new <KEY> <title> [--blocked-by ID,ID]
                           Create a Ticket in a Thread's Map. Prints the allocated ID.
   ticket claim <KEY> <ID> Mark a Ticket claimed.
   ticket done <KEY> <ID>  Mark a Ticket done.
+  blocker add <KEY> <ID> --blocked-by <ID>
+                          Add a Blocker edge to a Ticket.
+  blocker rm  <KEY> <ID> --blocked-by <ID>
+                          Remove a Blocker edge from a Ticket.
 
 Options:
   --json    Output machine-readable JSON on commands that support it
@@ -73,8 +82,8 @@ function parseArgs(argv: string[]): { positionals: string[]; flags: Flags } {
   return { positionals, flags };
 }
 
-function ok(stdout: string): Result {
-  return { stdout, stderr: "", exitCode: 0 };
+function ok(stdout: string, stderr = ""): Result {
+  return { stdout, stderr, exitCode: 0 };
 }
 
 function fail(message: string): Result {
@@ -206,18 +215,39 @@ function runThread(invocation: Invocation): Result {
   }
 }
 
-function runTicketNew({ env, positionals }: Invocation): Result {
+function isKnownTicketError(
+  error: unknown,
+): error is ThreadNotFoundError | TicketNotFoundError | CycleError | BlockerNotFoundError {
+  return (
+    error instanceof ThreadNotFoundError ||
+    error instanceof TicketNotFoundError ||
+    error instanceof CycleError ||
+    error instanceof BlockerNotFoundError
+  );
+}
+
+function parseBlockedBy(flag: string | true | undefined): string[] {
+  if (typeof flag !== "string") return [];
+  return flag
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
+function runTicketNew({ env, positionals, flags }: Invocation): Result {
   const key = positionals[0];
   const title = positionals[1];
   if (!key || !title) {
     return fail('ticket new requires a Thread key and a title, e.g. `owlet ticket new OWL-5 "Do the thing"`');
   }
 
+  const blockedBy = parseBlockedBy(flags["blocked-by"]);
+
   try {
-    const ticket = createTicket(env, key, title);
+    const ticket = createTicket(env, key, title, blockedBy);
     return ok(`${ticket.id}\n`);
   } catch (error) {
-    if (error instanceof ThreadNotFoundError) return fail(error.message);
+    if (isKnownTicketError(error)) return fail(error.message);
     throw error;
   }
 }
@@ -231,7 +261,7 @@ function runTicketClaim({ env, positionals }: Invocation): Result {
     const ticket = claimTicket(env, key, id);
     return ok(`${ticket.id} claimed\n`);
   } catch (error) {
-    if (error instanceof ThreadNotFoundError || error instanceof TicketNotFoundError) return fail(error.message);
+    if (isKnownTicketError(error)) return fail(error.message);
     throw error;
   }
 }
@@ -242,10 +272,18 @@ function runTicketDone({ env, positionals }: Invocation): Result {
   if (!key || !id) return fail("ticket done requires a Thread key and a Ticket ID");
 
   try {
+    const blockers = listBlockers(env, key, id);
     const ticket = doneTicket(env, key, id);
-    return ok(`${ticket.id} done\n`);
+
+    const unfinished = blockers.filter((blocker) => blocker.status !== "done");
+    const stderr =
+      unfinished.length > 0
+        ? `Warning: ${ticket.id} is done with unfinished Blocker(s): ${unfinished.map((blocker) => blocker.id).join(", ")}\n`
+        : "";
+
+    return ok(`${ticket.id} done\n`, stderr);
   } catch (error) {
-    if (error instanceof ThreadNotFoundError || error instanceof TicketNotFoundError) return fail(error.message);
+    if (isKnownTicketError(error)) return fail(error.message);
     throw error;
   }
 }
@@ -266,6 +304,54 @@ function runTicket(invocation: Invocation): Result {
   }
 }
 
+function runBlockerAdd({ env, positionals, flags }: Invocation): Result {
+  const key = positionals[0];
+  const id = positionals[1];
+  const blockedBy = flags["blocked-by"];
+  if (!key || !id || typeof blockedBy !== "string") {
+    return fail("blocker add requires a Thread key, a Ticket ID, and --blocked-by <ID>");
+  }
+
+  try {
+    const ticket = addBlocker(env, key, id, blockedBy);
+    return ok(`${ticket.id} blocked by ${blockedBy}\n`);
+  } catch (error) {
+    if (isKnownTicketError(error)) return fail(error.message);
+    throw error;
+  }
+}
+
+function runBlockerRemove({ env, positionals, flags }: Invocation): Result {
+  const key = positionals[0];
+  const id = positionals[1];
+  const blockedBy = flags["blocked-by"];
+  if (!key || !id || typeof blockedBy !== "string") {
+    return fail("blocker rm requires a Thread key, a Ticket ID, and --blocked-by <ID>");
+  }
+
+  try {
+    const ticket = removeBlocker(env, key, id, blockedBy);
+    return ok(`${ticket.id} no longer blocked by ${blockedBy}\n`);
+  } catch (error) {
+    if (isKnownTicketError(error)) return fail(error.message);
+    throw error;
+  }
+}
+
+function runBlocker(invocation: Invocation): Result {
+  const [sub, ...rest] = invocation.positionals;
+  const forSub = { ...invocation, positionals: rest };
+
+  switch (sub) {
+    case "add":
+      return runBlockerAdd(forSub);
+    case "rm":
+      return runBlockerRemove(forSub);
+    default:
+      return fail(`Unknown blocker command: ${sub ?? ""}\n\n${HELP}`);
+  }
+}
+
 export function run(argv: string[], env: Env, stdin = ""): Result {
   const { positionals, flags } = parseArgs(argv);
   const [command, ...rest] = positionals;
@@ -280,6 +366,10 @@ export function run(argv: string[], env: Env, stdin = ""): Result {
 
   if (command === "ticket") {
     return runTicket({ env, positionals: rest, flags, stdin });
+  }
+
+  if (command === "blocker") {
+    return runBlocker({ env, positionals: rest, flags, stdin });
   }
 
   return {

@@ -17,6 +17,7 @@ export type Ticket = {
   id: string;
   title: string;
   status: TicketStatus;
+  blockedBy: string[];
 };
 
 export class TicketNotFoundError extends Error {
@@ -31,6 +32,25 @@ export class TicketNotFoundError extends Error {
 export class CorruptTicketError extends Error {
   constructor(key: string, id: string, reason: string) {
     super(`${key}/${id}: ticket file is corrupt (${reason})`);
+  }
+}
+
+export class CycleError extends Error {
+  constructor(
+    public readonly key: string,
+    public readonly path: string[],
+  ) {
+    super(`${key}: this edge would create a cycle: ${path.join(" -> ")}`);
+  }
+}
+
+export class BlockerNotFoundError extends Error {
+  constructor(
+    public readonly key: string,
+    public readonly id: string,
+    public readonly blockerId: string,
+  ) {
+    super(`${key}/${id} is not blocked by ${blockerId}`);
   }
 }
 
@@ -72,6 +92,18 @@ function findTicketFile(dir: string, id: string): string | undefined {
   return ticketFiles(dir).find((name) => name.startsWith(`${id}-`));
 }
 
+function parseBlockedBy(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+}
+
+function serializeBlockedBy(ids: string[]): string {
+  return ids.join(",");
+}
+
 function readTicket(key: string, dir: string, filename: string): Ticket {
   const fields = parseFrontmatter(readFileSync(join(dir, filename), "utf-8"));
 
@@ -82,7 +114,7 @@ function readTicket(key: string, dir: string, filename: string): Ticket {
     throw new CorruptTicketError(key, id, `status must be one of ${TICKET_STATUSES.join(", ")}, got ${status}`);
   }
 
-  return { id, title: fields.title ?? "", status };
+  return { id, title: fields.title ?? "", status, blockedBy: parseBlockedBy(fields.blocked_by) };
 }
 
 function writeTicket(dir: string, filename: string, ticket: Ticket): void {
@@ -92,17 +124,74 @@ function writeTicket(dir: string, filename: string, ticket: Ticket): void {
       id: ticket.id,
       title: ticket.title,
       status: ticket.status,
-      blocked_by: "",
+      blocked_by: serializeBlockedBy(ticket.blockedBy),
     }),
   );
 }
 
-export function createTicket(env: Env, key: string, title: string): Ticket {
+// Maps each Ticket ID to the IDs it is blocked by.
+function buildEdges(key: string, dir: string): Map<string, string[]> {
+  const edges = new Map<string, string[]>();
+  for (const filename of ticketFiles(dir)) {
+    const ticket = readTicket(key, dir, filename);
+    edges.set(ticket.id, ticket.blockedBy);
+  }
+  return edges;
+}
+
+// BFS from `start`, following blocked_by edges, returning the first path found to `target`.
+function findPath(edges: Map<string, string[]>, start: string, target: string): string[] | undefined {
+  const queue: string[][] = [[start]];
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const path = queue.shift()!;
+    const last = path[path.length - 1]!;
+    if (last === target) return path;
+    if (visited.has(last)) continue;
+    visited.add(last);
+    for (const next of edges.get(last) ?? []) {
+      queue.push([...path, next]);
+    }
+  }
+
+  return undefined;
+}
+
+// Throws if adding the edge `id -> blockerId` (id is blocked by blockerId) would create a cycle,
+// including the degenerate self-edge case.
+function assertNoCycle(edges: Map<string, string[]>, key: string, id: string, blockerId: string): void {
+  if (id === blockerId) {
+    throw new CycleError(key, [id, blockerId]);
+  }
+
+  const pathBack = findPath(edges, blockerId, id);
+  if (pathBack) {
+    throw new CycleError(key, [id, ...pathBack]);
+  }
+}
+
+export function createTicket(env: Env, key: string, title: string, blockedBy: string[] = []): Ticket {
   const dir = requireMapDir(env, key);
 
   const id = nextId(dir);
-  const ticket: Ticket = { id, title, status: "open" };
+  const edges = buildEdges(key, dir);
 
+  const uniqueBlockedBy: string[] = [];
+  for (const blockerId of blockedBy) {
+    if (uniqueBlockedBy.includes(blockerId)) continue;
+    if (blockerId === id) {
+      throw new CycleError(key, [id, blockerId]);
+    }
+    if (!findTicketFile(dir, blockerId)) {
+      throw new TicketNotFoundError(key, blockerId);
+    }
+    assertNoCycle(edges, key, id, blockerId);
+    edges.set(id, [...(edges.get(id) ?? []), blockerId]);
+    uniqueBlockedBy.push(blockerId);
+  }
+
+  const ticket: Ticket = { id, title, status: "open", blockedBy: uniqueBlockedBy };
   writeTicket(dir, `${id}-${slugify(title)}.md`, ticket);
 
   return ticket;
@@ -136,4 +225,63 @@ export function claimTicket(env: Env, key: string, id: string): Ticket {
 
 export function doneTicket(env: Env, key: string, id: string): Ticket {
   return transitionTicket(env, key, id, "done");
+}
+
+export function addBlocker(env: Env, key: string, id: string, blockerId: string): Ticket {
+  const dir = requireMapDir(env, key);
+  const filename = findTicketFile(dir, id);
+  if (!filename) {
+    throw new TicketNotFoundError(key, id);
+  }
+  if (!findTicketFile(dir, blockerId)) {
+    throw new TicketNotFoundError(key, blockerId);
+  }
+
+  const ticket = readTicket(key, dir, filename);
+  if (ticket.blockedBy.includes(blockerId)) {
+    return ticket;
+  }
+
+  const edges = buildEdges(key, dir);
+  assertNoCycle(edges, key, id, blockerId);
+
+  const updated: Ticket = { ...ticket, blockedBy: [...ticket.blockedBy, blockerId] };
+  writeTicket(dir, filename, updated);
+
+  return updated;
+}
+
+export function removeBlocker(env: Env, key: string, id: string, blockerId: string): Ticket {
+  const dir = requireMapDir(env, key);
+  const filename = findTicketFile(dir, id);
+  if (!filename) {
+    throw new TicketNotFoundError(key, id);
+  }
+
+  const ticket = readTicket(key, dir, filename);
+  if (!ticket.blockedBy.includes(blockerId)) {
+    throw new BlockerNotFoundError(key, id, blockerId);
+  }
+
+  const updated: Ticket = { ...ticket, blockedBy: ticket.blockedBy.filter((blocked) => blocked !== blockerId) };
+  writeTicket(dir, filename, updated);
+
+  return updated;
+}
+
+export function listBlockers(env: Env, key: string, id: string): Ticket[] {
+  const dir = requireMapDir(env, key);
+  const filename = findTicketFile(dir, id);
+  if (!filename) {
+    throw new TicketNotFoundError(key, id);
+  }
+
+  const ticket = readTicket(key, dir, filename);
+  return ticket.blockedBy.map((blockerId) => {
+    const blockerFilename = findTicketFile(dir, blockerId);
+    if (!blockerFilename) {
+      throw new TicketNotFoundError(key, blockerId);
+    }
+    return readTicket(key, dir, blockerFilename);
+  });
 }

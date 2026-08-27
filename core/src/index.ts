@@ -14,12 +14,17 @@ export {
 } from "./thread";
 export type { CreateThreadInput, Route, Thread, ThreadStatus } from "./thread";
 export {
+  addBlocker,
+  BlockerNotFoundError,
   claimTicket,
   CorruptTicketError,
   createTicket,
+  CycleError,
   doneTicket,
   isTicketStatus,
+  listBlockers,
   listTickets,
+  removeBlocker,
   TICKET_STATUSES,
   TicketNotFoundError,
 } from "./ticket";
