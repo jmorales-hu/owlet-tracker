@@ -13,3 +13,14 @@ export {
   ThreadNotFoundError,
 } from "./thread";
 export type { CreateThreadInput, Route, Thread, ThreadStatus } from "./thread";
+export {
+  claimTicket,
+  CorruptTicketError,
+  createTicket,
+  doneTicket,
+  isTicketStatus,
+  listTickets,
+  TICKET_STATUSES,
+  TicketNotFoundError,
+} from "./ticket";
+export type { Ticket, TicketStatus } from "./ticket";

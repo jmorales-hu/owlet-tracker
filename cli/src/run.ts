@@ -1,13 +1,18 @@
-import type { Env, Thread } from "@owlet/core";
+import type { Env, Thread, Ticket } from "@owlet/core";
 import {
+  claimTicket,
   createThread,
+  createTicket,
   deliverThread,
+  doneTicket,
   isRoute,
   listThreads,
+  listTickets,
   ROUTES,
   showThread,
   ThreadExistsError,
   ThreadNotFoundError,
+  TicketNotFoundError,
 } from "@owlet/core";
 
 export type Result = {
@@ -27,6 +32,10 @@ Commands:
   thread list             List every Thread with its Route and status.
   thread show <KEY>       Show one Thread's Route, branch and creation date.
   thread deliver <KEY>    Mark a Thread delivered.
+  ticket new <KEY> <title>
+                          Create a Ticket in a Thread's Map. Prints the allocated ID.
+  ticket claim <KEY> <ID> Mark a Ticket claimed.
+  ticket done <KEY> <ID>  Mark a Ticket done.
 
 Options:
   --json    Output machine-readable JSON on commands that support it
@@ -82,21 +91,37 @@ function threadJson(thread: Thread) {
   };
 }
 
+function ticketJson(ticket: Ticket) {
+  return {
+    id: ticket.id,
+    title: ticket.title,
+    status: ticket.status,
+  };
+}
+
 function formatThreadList(threads: Thread[]): string {
   if (threads.length === 0) return "No Threads.\n";
   const rows = threads.map((thread) => `${thread.key}\t${thread.route}\t${thread.status}`);
   return ["KEY\tROUTE\tSTATUS", ...rows].join("\n") + "\n";
 }
 
-function formatThreadDetail(thread: Thread): string {
-  return [
+function formatThreadDetail(thread: Thread, tickets: Ticket[]): string {
+  const lines = [
     `Key:      ${thread.key}`,
     `Route:    ${thread.route}`,
     `Status:   ${thread.status}`,
     `Branch:   ${thread.branch}`,
     `Created:  ${thread.createdAt}`,
     "",
-  ].join("\n");
+  ];
+
+  if (tickets.length > 0) {
+    lines.push("Tickets:");
+    for (const ticket of tickets) lines.push(`  ${ticket.id}\t${ticket.status}\t${ticket.title}`);
+    lines.push("");
+  }
+
+  return lines.join("\n");
 }
 
 function runThreadNew({ env, positionals, flags, stdin }: Invocation): Result {
@@ -139,8 +164,11 @@ function runThreadShow({ env, positionals, flags }: Invocation): Result {
 
   try {
     const thread = showThread(env, key);
-    if (flags.json) return ok(`${JSON.stringify(threadJson(thread))}\n`);
-    return ok(formatThreadDetail(thread));
+    const tickets = listTickets(env, key);
+    if (flags.json) {
+      return ok(`${JSON.stringify({ ...threadJson(thread), tickets: tickets.map(ticketJson) })}\n`);
+    }
+    return ok(formatThreadDetail(thread, tickets));
   } catch (error) {
     if (error instanceof ThreadNotFoundError) return fail(error.message);
     throw error;
@@ -178,6 +206,66 @@ function runThread(invocation: Invocation): Result {
   }
 }
 
+function runTicketNew({ env, positionals }: Invocation): Result {
+  const key = positionals[0];
+  const title = positionals[1];
+  if (!key || !title) {
+    return fail('ticket new requires a Thread key and a title, e.g. `owlet ticket new OWL-5 "Do the thing"`');
+  }
+
+  try {
+    const ticket = createTicket(env, key, title);
+    return ok(`${ticket.id}\n`);
+  } catch (error) {
+    if (error instanceof ThreadNotFoundError) return fail(error.message);
+    throw error;
+  }
+}
+
+function runTicketClaim({ env, positionals }: Invocation): Result {
+  const key = positionals[0];
+  const id = positionals[1];
+  if (!key || !id) return fail("ticket claim requires a Thread key and a Ticket ID");
+
+  try {
+    const ticket = claimTicket(env, key, id);
+    return ok(`${ticket.id} claimed\n`);
+  } catch (error) {
+    if (error instanceof ThreadNotFoundError || error instanceof TicketNotFoundError) return fail(error.message);
+    throw error;
+  }
+}
+
+function runTicketDone({ env, positionals }: Invocation): Result {
+  const key = positionals[0];
+  const id = positionals[1];
+  if (!key || !id) return fail("ticket done requires a Thread key and a Ticket ID");
+
+  try {
+    const ticket = doneTicket(env, key, id);
+    return ok(`${ticket.id} done\n`);
+  } catch (error) {
+    if (error instanceof ThreadNotFoundError || error instanceof TicketNotFoundError) return fail(error.message);
+    throw error;
+  }
+}
+
+function runTicket(invocation: Invocation): Result {
+  const [sub, ...rest] = invocation.positionals;
+  const forSub = { ...invocation, positionals: rest };
+
+  switch (sub) {
+    case "new":
+      return runTicketNew(forSub);
+    case "claim":
+      return runTicketClaim(forSub);
+    case "done":
+      return runTicketDone(forSub);
+    default:
+      return fail(`Unknown ticket command: ${sub ?? ""}\n\n${HELP}`);
+  }
+}
+
 export function run(argv: string[], env: Env, stdin = ""): Result {
   const { positionals, flags } = parseArgs(argv);
   const [command, ...rest] = positionals;
@@ -188,6 +276,10 @@ export function run(argv: string[], env: Env, stdin = ""): Result {
 
   if (command === "thread") {
     return runThread({ env, positionals: rest, flags, stdin });
+  }
+
+  if (command === "ticket") {
+    return runTicket({ env, positionals: rest, flags, stdin });
   }
 
   return {
